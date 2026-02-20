@@ -73,8 +73,11 @@ class Photo(Media):
                         dt_list = dt_list + compile(r'-|:').split(tm)
                         dt_list = map(int, dt_list)
                         time_tuple = datetime(*dt_list).timetuple()
-                        seconds_since_epoch = time.mktime(time_tuple)
-                        break
+                        # Return the EXIF local time directly without converting
+                        # through the system timezone. EXIF DateTimeOriginal
+                        # stores the wall-clock time at the location of capture
+                        # (no timezone info), so no UTC conversion should occur.
+                        return time.struct_time(time_tuple[:8] + (0,))
             except BaseException as e:
                 log.error(e)
                 pass

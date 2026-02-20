@@ -76,24 +76,18 @@ class Video(Media):
                 date = re.search('([0-9: ]+)([-+][0-9:]+)?', exif[date_key])
                 if(date is not None):
                     date_string = date.group(1)
-                    date_offset = date.group(2)
                     try:
-                        exif_seconds_since_epoch = time.mktime(
-                            datetime.strptime(
-                                date_string,
-                                '%Y:%m:%d %H:%M:%S'
-                            ).timetuple()
-                        )
-                        if(exif_seconds_since_epoch < seconds_since_epoch):
-                            seconds_since_epoch = exif_seconds_since_epoch
-                            if date_offset is not None:
-                                offset_parts = date_offset[1:].split(':')
-                                offset_seconds = int(offset_parts[0]) * 3600
-                                offset_seconds = offset_seconds + int(offset_parts[1]) * 60  # noqa
-                                if date_offset[0] == '-':
-                                    seconds_since_epoch - offset_seconds
-                                elif date_offset[0] == '+':
-                                    seconds_since_epoch + offset_seconds
+                        time_tuple = datetime.strptime(
+                            date_string,
+                            '%Y:%m:%d %H:%M:%S'
+                        ).timetuple()
+                        # Return the EXIF local time directly without converting
+                        # through the system timezone. EXIF/QuickTime dates store
+                        # the wall-clock time at the location of capture, so no
+                        # UTC conversion should occur. For formats that include a
+                        # timezone offset (e.g. 2015:01:19 12:45:11-08:00), the
+                        # date_string portion already represents the local time.
+                        return time.struct_time(time_tuple[:8] + (0,))
                     except:
                         pass
 
