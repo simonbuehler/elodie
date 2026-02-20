@@ -16,16 +16,15 @@ from elodie.media.base import Base
 
 
 class Text(Base):
-
     """The class for all text files.
 
     :param str source: The fully qualified path to the text file.
     """
 
-    __name__ = 'Text'
+    __name__ = "Text"
 
     #: Valid extensions for text files.
-    extensions = ('txt',)
+    extensions = ("txt",)
 
     def __init__(self, source=None):
         super(Text, self).__init__(source)
@@ -33,21 +32,23 @@ class Text(Base):
 
     def get_album(self):
         self.parse_metadata_line()
-        if(not isinstance(self.metadata_line, dict) or
-                'album' not in self.metadata_line):
+        if (
+            not isinstance(self.metadata_line, dict)
+            or "album" not in self.metadata_line
+        ):
             return None
 
-        return self.metadata_line['album']
+        return self.metadata_line["album"]
 
-    def get_coordinate(self, type='latitude'):
+    def get_coordinate(self, type="latitude"):
         self.parse_metadata_line()
         if not self.metadata_line:
             return None
         elif type in self.metadata_line:
-            if type == 'latitude':
-                return self.metadata_line['latitude'] or None
-            elif type == 'longitude':
-                return self.metadata_line['longitude'] or None
+            if type == "latitude":
+                return self.metadata_line["latitude"] or None
+            elif type == "longitude":
+                return self.metadata_line["longitude"] or None
 
         return None
 
@@ -56,16 +57,12 @@ class Text(Base):
         self.parse_metadata_line()
 
         # We return the value if found in metadata
-        if(isinstance(self.metadata_line, dict) and
-                'date_taken' in self.metadata_line):
-            return time.gmtime(self.metadata_line['date_taken'])
+        if isinstance(self.metadata_line, dict) and "date_taken" in self.metadata_line:
+            return time.gmtime(self.metadata_line["date_taken"])
 
         # If there's no date_taken in the metadata we return
         #   from the filesystem
-        seconds_since_epoch = min(
-            os.path.getmtime(source),
-            os.path.getctime(source)
-        )
+        seconds_since_epoch = min(os.path.getmtime(source), os.path.getctime(source))
         return time.gmtime(seconds_since_epoch)
 
     def get_metadata(self):
@@ -76,40 +73,43 @@ class Text(Base):
         self.parse_metadata_line()
 
         # We return the value if found in metadata
-        if(isinstance(self.metadata_line, dict) and
-                'original_name' in self.metadata_line):
-            return self.metadata_line['original_name']
+        if (
+            isinstance(self.metadata_line, dict)
+            and "original_name" in self.metadata_line
+        ):
+            return self.metadata_line["original_name"]
 
         return super(Text, self).get_original_name()
 
     def get_title(self):
         self.parse_metadata_line()
 
-        if(not isinstance(self.metadata_line, dict) or
-                'title' not in self.metadata_line):
+        if (
+            not isinstance(self.metadata_line, dict)
+            or "title" not in self.metadata_line
+        ):
             return None
 
-        return self.metadata_line['title']
+        return self.metadata_line["title"]
 
     def reset_cache(self):
-        """Resets any internal cache
-        """
+        """Resets any internal cache"""
         self.metadata_line = None
         super(Text, self).reset_cache()
 
     def _read_with_fallback_encoding(self):
         source = self.source
-        encodings = ('utf-8', 'cp1252', 'latin-1')
+        encodings = ("utf-8", "cp1252", "latin-1")
 
         for encoding in encodings:
             try:
-                with open(source, 'r', encoding=encoding) as f:
+                with open(source, "r", encoding=encoding) as f:
                     return f.read(), encoding
             except UnicodeDecodeError:
                 continue
 
-        with open(source, 'r', encoding='utf-8', errors='ignore') as f:
-            return f.read(), 'utf-8'
+        with open(source, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read(), "utf-8"
 
     def set_album(self, name):
         status = self.write_metadata(album=name)
@@ -117,7 +117,7 @@ class Text(Base):
         return status
 
     def set_date_taken(self, passed_in_time):
-        if(time is None):
+        if time is None:
             return False
 
         seconds_since_epoch = time.mktime(passed_in_time.timetuple())
@@ -130,7 +130,7 @@ class Text(Base):
 
         :returns: True, False, None
         """
-        if(not self.is_valid()):
+        if not self.is_valid():
             return None
 
         # If EXIF original name tag is set then we return.
@@ -160,14 +160,14 @@ class Text(Base):
             return None
 
         file_contents, _ = self._read_with_fallback_encoding()
-        first_line = file_contents.splitlines()[0].strip() if file_contents else ''
+        first_line = file_contents.splitlines()[0].strip() if file_contents else ""
 
         try:
             parsed_json = loads(first_line)
             if isinstance(parsed_json, dict):
                 self.metadata_line = parsed_json
         except ValueError:
-            log.error('Could not parse JSON from first line: %s' % first_line)
+            log.error("Could not parse JSON from first line: %s" % first_line)
             pass
 
     def write_metadata(self, **kwargs):
@@ -190,22 +190,21 @@ class Text(Base):
             metadata_line[name] = kwargs[name]
 
         metadata_as_json = dumps(metadata_line)
-        
+
         # Create an _original copy just as we do with exiftool
         # This is to keep all file processing logic in line with exiftool
-        copy2(source, source + '_original')
+        copy2(source, source + "_original")
 
         original_contents, detected_encoding = self._read_with_fallback_encoding()
 
         if has_metadata:
             lines = original_contents.splitlines(True)
-            original_body = ''.join(lines[1:])
+            original_body = "".join(lines[1:])
             rewritten_contents = "{}\n{}".format(metadata_as_json, original_body)
         else:
-            rewritten_contents = "{}\n{}".format(metadata_as_json,
-                                                   original_contents)
+            rewritten_contents = "{}\n{}".format(metadata_as_json, original_contents)
 
-        with open(source, 'w', encoding=detected_encoding, errors='ignore') as f_write:
+        with open(source, "w", encoding=detected_encoding, errors="ignore") as f_write:
             f_write.write(rewritten_contents)
 
         self.reset_cache()
