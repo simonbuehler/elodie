@@ -167,7 +167,7 @@ class Db(object):
             # Use if closer then threshold_km reuse lookup
             if(d <= threshold_m and d < last_d):
                 name = data['name']
-            last_d = d
+                last_d = d
 
         return name
 
