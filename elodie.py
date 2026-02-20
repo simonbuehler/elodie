@@ -36,7 +36,7 @@ from elodie import constants
 
 FILESYSTEM = FileSystem()
 
-def import_file(_file, destination, album_from_folder, trash, allow_duplicates, location=None, time=None):
+def import_file(_file, destination, album_from_folder, trash, allow_duplicates, location=None, time=None, db=None):
     
     _file = _decode(_file)
     destination = _decode(destination)
@@ -71,7 +71,7 @@ def import_file(_file, destination, album_from_folder, trash, allow_duplicates, 
         update_time(media, _file, time)
 
     dest_path = FILESYSTEM.process_file(_file, destination,
-        media, allowDuplicate=allow_duplicates, move=False)
+        media, allowDuplicate=allow_duplicates, move=False, db=db)
     if dest_path:
         log.all('%s -> %s' % (_file, dest_path))
     if trash:
@@ -156,16 +156,30 @@ def _import(destination, source, file, album_from_folder, trash, allow_duplicate
             if not FILESYSTEM.should_exclude(path, exclude_regex_list, True):
                 files.add(path)
 
+    # Share a single Db instance across the whole import batch.
+    # This avoids re-reading hash.json / location.json from disk for every
+    # file and allows us to batch the writes instead of flushing after each
+    # individual file (a major bottleneck at 30-50k files).
+    db = Db()
+    files_imported = 0
     for current_file in files:
         dest_path = import_file(current_file, destination, album_from_folder,
-                    trash, allow_duplicates, location, time)
+                    trash, allow_duplicates, location, time, db=db)
         if dest_path:
             result.append((current_file, True))
+            files_imported += 1
+            # Flush to disk every 100 successfully imported files so that
+            # partial progress is preserved if the process is interrupted.
+            if files_imported % 100 == 0:
+                db.update_hash_db()
         elif not allow_duplicates:
             result.append((current_file, None))  # duplicate
         else:
             result.append((current_file, False))  # error
         has_errors = has_errors is True or not dest_path
+
+    # Final flush for any remaining entries.
+    db.update_hash_db()
 
     result.write()
 

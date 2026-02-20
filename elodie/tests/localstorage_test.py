@@ -232,6 +232,38 @@ def test_get_location_name_outside_threshold():
 
     assert retrieved_name is None
 
+def test_get_location_name_closest_match_with_interleaved_far_entry():
+    """Regression test: get_location_name must return the *closest* matching
+    entry even when non-matching (far-away) entries appear between two
+    within-threshold entries in the list.
+
+    Previously last_d was updated unconditionally on every iteration, which
+    caused a farther entry to be selected when a non-matching entry appeared
+    between two matching entries.
+    """
+    db = Db()
+    db.reset_hash_db()
+    db.location_db = []
+
+    # Entry 1: closest (~14 m away)
+    close_lat, close_lon = 37.0001, -122.0001
+    db.add_location(close_lat, close_lon, {'default': 'Closest'})
+
+    # Entry 2: very far away – outside the threshold
+    db.add_location(50.0, -100.0, {'default': 'FarAway'})
+
+    # Entry 3: within threshold but further than entry 1 (~140 m away)
+    db.add_location(37.001, -122.001, {'default': 'Farther'})
+
+    # Query at the close_lat/close_lon position with a 3 km threshold
+    result = db.get_location_name(close_lat, close_lon, 3000)
+
+    assert result == {'default': 'Closest'}, (
+        'Expected Closest but got %r – get_location_name returned the wrong '
+        'entry when a non-matching (far) entry appeared between two '
+        'within-threshold entries' % result
+    )
+
 def test_get_location_coordinates_exists():
     db = Db()
     
