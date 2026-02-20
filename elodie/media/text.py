@@ -7,7 +7,7 @@ are tracked by Elodie.
 
 from json import dumps, loads
 import os
-from shutil import copy2, copyfileobj
+from shutil import copy2
 import time
 
 # load modules
@@ -97,6 +97,20 @@ class Text(Base):
         self.metadata_line = None
         super(Text, self).reset_cache()
 
+    def _read_with_fallback_encoding(self):
+        source = self.source
+        encodings = ('utf-8', 'cp1252', 'latin-1')
+
+        for encoding in encodings:
+            try:
+                with open(source, 'r', encoding=encoding) as f:
+                    return f.read(), encoding
+            except UnicodeDecodeError:
+                continue
+
+        with open(source, 'r', encoding='utf-8', errors='ignore') as f:
+            return f.read(), 'utf-8'
+
     def set_album(self, name):
         status = self.write_metadata(album=name)
         self.reset_cache()
@@ -145,13 +159,8 @@ class Text(Base):
         if source is None:
             return None
 
-        try:
-            with open(source, 'r') as f:
-                first_line = f.readline().strip()
-        except UnicodeDecodeError:
-            # Handle non-UTF-8 files by reading with error handling
-            with open(source, 'r', encoding='utf-8', errors='ignore') as f:
-                first_line = f.readline().strip()
+        file_contents, _ = self._read_with_fallback_encoding()
+        first_line = file_contents.splitlines()[0].strip() if file_contents else ''
 
         try:
             parsed_json = loads(first_line)
@@ -186,23 +195,18 @@ class Text(Base):
         # This is to keep all file processing logic in line with exiftool
         copy2(source, source + '_original')
 
+        original_contents, detected_encoding = self._read_with_fallback_encoding()
+
         if has_metadata:
-            # Update the first line of this file in place
-            # http://stackoverflow.com/a/14947384
-            with open(source, 'r') as f_read:
-                f_read.readline()
-                with open(source, 'w') as f_write:
-                    f_write.write("{}\n".format(metadata_as_json))
-                    copyfileobj(f_read, f_write)
+            lines = original_contents.splitlines(True)
+            original_body = ''.join(lines[1:])
+            rewritten_contents = "{}\n{}".format(metadata_as_json, original_body)
         else:
-            # Prepend the metadata to the file
-            with open(source, 'r') as f_read:
-                original_contents = f_read.read()
-                with open(source, 'w') as f_write:
-                    f_write.write("{}\n{}".format(
-                        metadata_as_json,
-                        original_contents)
-                    )
+            rewritten_contents = "{}\n{}".format(metadata_as_json,
+                                                   original_contents)
+
+        with open(source, 'w', encoding=detected_encoding, errors='ignore') as f_write:
+            f_write.write(rewritten_contents)
 
         self.reset_cache()
         return True

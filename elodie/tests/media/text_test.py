@@ -329,3 +329,20 @@ def test_parse_metadata_line_with_non_utf8_encoding():
     metadata = text.get_metadata()
     assert metadata is not None
     assert metadata['mime_type'] == 'text/plain'
+
+def test_set_original_name_with_non_utf8_encoding():
+    # Regression for write path on cp1252 files (Windows default decoding issue)
+    temporary_folder, folder = helper.create_working_folder()
+
+    origin = '%s/cp1252.txt' % folder
+    shutil.copyfile(helper.get_file('cp1252.txt'), origin)
+
+    text = Text(origin)
+
+    status = text.set_original_name('cp1252.txt')
+    metadata = text.get_metadata()
+
+    shutil.rmtree(folder)
+
+    assert status == True, status
+    assert metadata['original_name'] == 'cp1252.txt', metadata['original_name']
