@@ -14,6 +14,7 @@ import os
 import six
 
 # load modules
+from elodie import constants
 from elodie.external.pyexiftool import ExifTool
 from elodie.media.base import Base
 
@@ -318,6 +319,11 @@ class Media(Base):
             return None
 
         source = self.source
+
+        # exiftool writes into the source file itself, so a dry run must not call it
+        if constants.dry_run:
+            print(f"[DRY-RUN] Would write {', '.join(tags)} to: {source}")
+            return True
 
         status = ''
         status = ExifTool().set_tags(tags,source)

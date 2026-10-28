@@ -576,13 +576,22 @@ class FileSystem(object):
         file_name = self.get_file_name(metadata)
         dest_path = os.path.join(dest_directory, file_name)        
 
-        media.set_original_name()
-
         # If source and destination are identical then
         #  we should not write the file. gh-210
         if(_file == dest_path):
             print('Final source and destination path should not be identical')
             return
+
+        # Never replace a different file at the destination: two photos with the
+        #  same name taken in the same second map to the same path, and the file
+        #  there may carry tags written after its import. --allow-duplicates
+        #  keeps the old behaviour of writing over it.
+        if(allow_duplicate is False and os.path.exists(dest_path)):
+            log.warn('%s already exists, not imported: %s' % (dest_path, _file))
+            print('%s already exists, not imported: %s' % (dest_path, _file))
+            return
+
+        media.set_original_name()
 
         self.create_directory(dest_directory)
 

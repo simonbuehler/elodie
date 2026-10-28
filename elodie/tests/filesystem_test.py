@@ -1502,3 +1502,56 @@ def test_process_file_dry_run_real():
     shutil.rmtree(folder)
     if destination:
         shutil.rmtree(os.path.dirname(os.path.dirname(destination)))
+
+
+def _media_mock(origin):
+    media = mock.Mock(source=origin)
+    media.is_valid.return_value = True
+    media.get_metadata.return_value = {}
+    return media
+
+
+@mock.patch('elodie.filesystem.FileSystem.get_file_name', return_value='photo.jpg')
+@mock.patch('elodie.filesystem.FileSystem.get_folder_path', return_value='2015')
+def test_process_file_does_not_overwrite_existing_destination(mock_folder, mock_name):
+    filesystem = FileSystem()
+    temporary_folder, folder = helper.create_working_folder()
+    origin = os.path.join(folder, 'photo.jpg')
+    shutil.copyfile(helper.get_file('plain.jpg'), origin)
+    existing = os.path.join(temporary_folder, '2015', 'photo.jpg')
+    os.makedirs(os.path.dirname(existing))
+    with open(existing, 'w') as f:
+        f.write('tagged copy already in the library')
+    media = _media_mock(origin)
+
+    destination = filesystem.process_file(origin, temporary_folder, media, allowDuplicate=False)
+
+    with open(existing) as f:
+        kept = f.read()
+    shutil.rmtree(folder)
+    shutil.rmtree(os.path.join(temporary_folder, '2015'))
+
+    assert destination is None, destination
+    assert kept == 'tagged copy already in the library'
+    media.set_original_name.assert_not_called()
+
+
+@mock.patch('elodie.constants.dry_run', True)
+@mock.patch('elodie.media.media.ExifTool')
+def test_set_tags_dry_run_leaves_source_alone(mock_exiftool):
+    temporary_folder, folder = helper.create_working_folder()
+    origin = os.path.join(folder, 'photo.jpg')
+    shutil.copyfile(helper.get_file('plain.jpg'), origin)
+    checksum = helper.checksum(origin)
+    media = Photo(origin)
+
+    with mock.patch.object(media, 'is_valid', return_value=True), \
+            mock.patch.object(media, 'get_original_name', return_value=None):
+        status = media.set_original_name()
+
+    after = helper.checksum(origin)
+    shutil.rmtree(folder)
+
+    assert status is True
+    mock_exiftool.assert_not_called()
+    assert after == checksum
