@@ -6,6 +6,7 @@ General file system methods.
 from __future__ import print_function
 from builtins import object
 
+import datetime
 import os
 import re
 import shutil
@@ -20,6 +21,62 @@ from elodie.config import load_config
 from elodie.localstorage import Db
 from elodie.media.base import Base, get_all_subclasses
 from elodie.plugins.plugins import Plugins
+
+# A date and time token in a camera or phone file name, e.g. img_20130930_094200,
+#  20181117_160532, vid_20190809_111855, pxl_20220101_101010123.
+REPEATED_DATE_TIME = re.compile(
+    r'(?P<gen>(?:img|vid|pxl|mvimg|image|video|photo|dsc)?[_-]?)'
+    r'(?P<d>(?:19|20)\d{6})[_-](?P<t>\d{6})(?P<ms>\d{0,3})(?=[^0-9]|$)',
+    re.IGNORECASE)
+# A date-only token, e.g. img-20190809-wa0015 or 20190809.
+REPEATED_DATE = re.compile(
+    r'(?P<gen>(?:img|vid|image|video)?[_-]?)'
+    r'(?P<d>(?:19|20)\d{6})(?=[^0-9]|$)(?![_-]\d{6})',
+    re.IGNORECASE)
+GENERIC_NAME_PARTS = ('img', 'vid', 'pxl', 'mvimg', 'image', 'video', 'photo', '')
+# Phones name a file when the shutter fires, panoramas when they are stitched.
+REPEATED_DATE_TOLERANCE_SECONDS = 600
+
+
+def strip_repeated_date(original_name, date_taken):
+    """Drop the capture date an original file name repeats.
+
+    File names start with the capture date already, so
+    2013-09-30_09-42-00-img_20130930_094200.jpg says it twice. The date token
+    and generic leftovers (img, vid, pxl, ...) are dropped; a meaningful rest
+    (wa0015, burst numbers, a title) is kept. A date and time token counts
+    only when it shows the same moment as date_taken (within 10 minutes), a
+    date-only token only on the same day. A token a whole number of hours away
+    (UTC instead of local time) or on another day keeps the whole name, since
+    it is the only other clue to the capture time.
+
+    :param str original_name: the original name without extension
+    :param time.struct_time date_taken: the capture time used in the prefix
+    :returns: str, the name without the repeated date (may be empty)
+    """
+    if not original_name or not date_taken:
+        return original_name
+    taken = datetime.datetime(*date_taken[:6])
+    for pattern, date_only in ((REPEATED_DATE_TIME, False), (REPEATED_DATE, True)):
+        for token in pattern.finditer(original_name):
+            try:
+                if date_only:
+                    name_time = datetime.datetime.strptime(token.group('d'), '%Y%m%d')
+                    if name_time.date() != taken.date():
+                        continue
+                else:
+                    name_time = datetime.datetime.strptime(
+                        token.group('d') + token.group('t'), '%Y%m%d%H%M%S')
+                    if abs((name_time - taken).total_seconds()) > REPEATED_DATE_TOLERANCE_SECONDS:
+                        continue
+            except ValueError:
+                continue
+            left = original_name[:token.start('gen')].strip('_- ~(.')
+            right = original_name[token.end():].strip('_- ~(.').rstrip(')')
+            parts = [p for p in (left, right) if p.lower() not in GENERIC_NAME_PARTS]
+            return '-'.join(parts)
+    return original_name
+
 
 class FileSystem(object):
     """A class for interacting with the file system."""
@@ -140,8 +197,12 @@ class FileSystem(object):
         """
         return os.getcwd()
 
-    def get_file_name(self, metadata):
+    def get_file_name(self, metadata, keep_repeated_date=False):
         """Generate file name for a photo or video using its metadata.
+
+        The original name loses a date it repeats from the prefix
+        (strip_repeated_date) unless keep_repeated_date is True; process_file
+        uses that as the fallback when the short name is taken.
 
         Originally we hardcoded the file name to include an ISO date format.
         We use an ISO8601-like format for the file name prefix. Instead of
@@ -217,6 +278,9 @@ class FileSystem(object):
 
                     # Lastly we want to sanitize the name
                     this_value = re.sub(self.whitespace_regex, '-', this_value.strip())
+                    if not keep_repeated_date:
+                        # An empty rest removes the placeholder with its separator.
+                        this_value = strip_repeated_date(this_value, metadata['date_taken']) or None
                 elif part.startswith('"') and part.endswith('"'):
                     this_value = part[1:-1]
                     break
@@ -586,6 +650,14 @@ class FileSystem(object):
         #  same name taken in the same second map to the same path, and the file
         #  there may carry tags written after its import. --allow-duplicates
         #  keeps the old behaviour of writing over it.
+        if(allow_duplicate is False and os.path.exists(dest_path)):
+            # The short name (repeated date dropped) may be taken by a photo
+            #  of the same second; the full original name usually is not.
+            long_name = self.get_file_name(metadata, keep_repeated_date=True)
+            if(long_name != file_name and
+                    not os.path.exists(os.path.join(dest_directory, long_name))):
+                file_name = long_name
+                dest_path = os.path.join(dest_directory, file_name)
         if(allow_duplicate is False and os.path.exists(dest_path)):
             log.warn('%s already exists, not imported: %s' % (dest_path, _file))
             print('%s already exists, not imported: %s' % (dest_path, _file))

@@ -1555,3 +1555,65 @@ def test_set_tags_dry_run_leaves_source_alone(mock_exiftool):
     assert status is True
     mock_exiftool.assert_not_called()
     assert after == checksum
+
+
+def _taken(text):
+    return time.strptime(text, '%Y-%m-%d %H:%M:%S')
+
+
+@pytest.mark.parametrize('original, taken, expected', [
+    ('IMG_20130930_094200', '2013-09-30 09:42:00', ''),
+    ('VID_20190809_111855', '2019-08-09 11:18:55', ''),
+    ('PXL_20220101_101010123', '2022-01-01 10:10:10', ''),
+    ('20181117_160532', '2018-11-17 16:05:32', ''),
+    ('IMG_20130930_094200', '2013-09-30 09:47:30', ''),             # saved a few minutes later
+    ('IMG_20190809_111855_BURST002', '2019-08-09 11:18:55', 'BURST002'),
+    ('IMG-20190809-WA0015', '2019-08-09 18:00:00', 'WA0015'),       # date-only token, same day
+    ('Screenshot_20200101-101010_Maps', '2020-01-01 10:10:10', 'Screenshot-Maps'),
+    ('VID_20190404_121944', '2019-04-04 10:19:44', 'VID_20190404_121944'),   # UTC prefix: keep
+    ('IMG-20190809-WA0015', '2019-08-10 09:00:00', 'IMG-20190809-WA0015'),   # forwarded later: keep
+    ('dsc01234', '2013-09-30 09:42:00', 'dsc01234'),                 # no date in the name
+    ('IMG_20131332_094200', '2013-09-30 09:42:00', 'IMG_20131332_094200'),   # not a date
+])
+def test_strip_repeated_date(original, taken, expected):
+    from elodie.filesystem import strip_repeated_date
+    assert strip_repeated_date(original, _taken(taken)) == expected
+
+
+def test_get_file_name_drops_repeated_date():
+    filesystem = FileSystem()
+    metadata = {'date_taken': _taken('2013-09-30 09:42:00'), 'original_name': 'IMG_20130930_094200.jpg',
+                'base_name': 'IMG_20130930_094200', 'extension': 'jpg', 'title': None, 'album': None}
+    assert filesystem.get_file_name(metadata) == '2013-09-30_09-42-00.jpg'
+    assert filesystem.get_file_name(metadata, keep_repeated_date=True) == \
+        '2013-09-30_09-42-00-img_20130930_094200.jpg'
+    metadata['title'] = 'Sunset'
+    assert filesystem.get_file_name(metadata) == '2013-09-30_09-42-00-sunset.jpg'
+
+
+@mock.patch('elodie.filesystem.FileSystem.get_folder_path', return_value='2013')
+def test_process_file_falls_back_to_long_name_when_short_is_taken(mock_folder):
+    filesystem = FileSystem()
+    temporary_folder, folder = helper.create_working_folder()
+    origin = os.path.join(folder, 'photo.jpg')
+    shutil.copyfile(helper.get_file('plain.jpg'), origin)
+    existing = os.path.join(temporary_folder, '2013', 'short.jpg')
+    os.makedirs(os.path.dirname(existing))
+    with open(existing, 'w') as f:
+        f.write('photo of the same second already in the library')
+    media = _media_mock(origin)
+    media.get_metadata.return_value = {'date_taken': _taken('2013-09-30 09:42:00'), 'base_name': 'photo',
+                                       'original_name': None, 'extension': 'jpg', 'title': None, 'album': None,
+                                       'latitude': None, 'longitude': None}
+    names = lambda metadata, keep_repeated_date=False: 'long.jpg' if keep_repeated_date else 'short.jpg'
+
+    with mock.patch.object(FileSystem, 'get_file_name', side_effect=names):
+        destination = filesystem.process_file(origin, temporary_folder, media, allowDuplicate=False)
+
+    with open(existing) as f:
+        kept = f.read()
+    shutil.rmtree(folder)
+    shutil.rmtree(os.path.join(temporary_folder, '2013'))
+
+    assert kept == 'photo of the same second already in the library'
+    assert destination is not None and destination.endswith(os.path.join('2013', 'long.jpg')), destination
